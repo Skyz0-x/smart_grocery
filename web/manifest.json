@@ -1,6 +1,6 @@
 {
-    "name": "smart_grocery",
-    "short_name": "smart_grocery",
+    "name": "grocery_app",
+    "short_name": "grocery_app",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

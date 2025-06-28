@@ -1,4 +1,4 @@
-# smart_grocery
+# grocery_app
 
 A new Flutter project.
 
