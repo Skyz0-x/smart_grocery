@@ -1,48 +1,44 @@
+// models/grocery_item.dart
 class GroceryItem {
-  String id;
-  String name;
-  int quantity;
-  String category;
-  double price;
-  bool isPurchased;
-  DateTime createdAt;
+  final String? id;
+  final String name;
+  final int quantity;
+  final double price;
+  final String category;
+  final bool isPurchased;
+  final DateTime? createdAt;
 
   GroceryItem({
-    String? id,
+    this.id,
     required this.name,
     required this.quantity,
-    required this.category,
     required this.price,
+    required this.category,
     this.isPurchased = false,
-    DateTime? createdAt,
-  })  : id = id ?? DateTime.now().millisecondsSinceEpoch.toString(),
-        createdAt = createdAt ?? DateTime.now();
+    this.createdAt,
+  });
 
   Map<String, dynamic> toJson() {
     return {
-      'id': id,
       'name': name,
       'quantity': quantity,
-      'category': category,
       'price': price,
+      'category': category,
       'isPurchased': isPurchased,
-      'createdAt': createdAt.millisecondsSinceEpoch,
+      'createdAt': createdAt?.millisecondsSinceEpoch,
     };
   }
 
   factory GroceryItem.fromJson(Map<String, dynamic> json) {
     return GroceryItem(
-      id: json['id'],
       name: json['name'],
-      quantity: json['quantity'] is int
-          ? json['quantity']
-          : int.tryParse(json['quantity'].toString()) ?? 1,
+      quantity: json['quantity'],
+      price: (json['price'] as num).toDouble(),
       category: json['category'],
-      price: json['price'] is double
-          ? json['price']
-          : double.tryParse(json['price'].toString()) ?? 0.0,
       isPurchased: json['isPurchased'] ?? false,
-      createdAt: DateTime.fromMillisecondsSinceEpoch(json['createdAt']),
+      createdAt: json['createdAt'] != null 
+          ? DateTime.fromMillisecondsSinceEpoch(json['createdAt'])
+          : null,
     );
   }
 }

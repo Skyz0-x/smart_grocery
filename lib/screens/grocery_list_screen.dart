@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'dart:convert';
 // FIX: Use correct import paths for your app
 import '../models/grocery_item.dart';
 import '../utils/storage_helper.dart';
@@ -14,7 +17,6 @@ class GroceryListScreen extends StatefulWidget {
 
 class _GroceryListScreenState extends State<GroceryListScreen> {
   List<GroceryItem> _items = [];
-  // FIX: Add 'All' to the categories list
   List<String> _categories = [
     'All',
     'Fruits & Vegetables',
@@ -28,6 +30,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     'Other',
   ];
   String _selectedCategory = 'All';
+  MobileScannerController? _scannerController;
 
   @override
   void initState() {
@@ -108,6 +111,10 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
       appBar: AppBar(
         title: Text('Smart Grocery List'),
         actions: [
+          IconButton(
+            icon: Icon(Icons.qr_code),
+            onPressed: _showShareOptions,
+          ),
           IconButton(icon: Icon(Icons.analytics), onPressed: _showBudgetDialog),
           IconButton(
             icon: Icon(Icons.logout),
@@ -179,7 +186,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
       children: [
         Text(label, style: TextStyle(fontWeight: FontWeight.bold)),
         Text(
-          '\$${value.toStringAsFixed(2)}',
+          'RM${value.toStringAsFixed(2)}',
           style: TextStyle(fontSize: 18, color: color),
         ),
       ],
@@ -192,10 +199,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
       padding: EdgeInsets.symmetric(horizontal: 16),
       child: ListView(
         scrollDirection: Axis.horizontal,
-        children: [
-          _buildCategoryChip('All'),
-          ..._categories.map((c) => _buildCategoryChip(c)),
-        ],
+        children: _categories.map((c) => _buildCategoryChip(c)).toList(),
       ),
     );
   }
@@ -269,7 +273,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
           ),
         ),
         subtitle: Text(
-          'Qty: ${item.quantity} • \$${(item.price * item.quantity).toStringAsFixed(2)}',
+          'Qty: ${item.quantity} • RM${(item.price * item.quantity).toStringAsFixed(2)}',
         ),
         trailing: PopupMenuButton<String>(
           itemBuilder: (_) => [
@@ -287,6 +291,151 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     );
   }
 
+  void _showShareOptions() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Container(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Share Your List',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 16),
+            ListTile(
+              leading: Icon(Icons.qr_code, color: Colors.green),
+              title: Text('Generate QR Code'),
+              subtitle: Text('Create QR code to share your list'),
+              onTap: () {
+                Navigator.pop(context);
+                _generateQRCode();
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.qr_code_scanner, color: Colors.blue),
+              title: Text('Scan QR Code'),
+              subtitle: Text('Import list from QR code'),
+              onTap: () {
+                Navigator.pop(context);
+                _scanQRCode();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _generateQRCode() {
+    final listData = {
+      'items': _items.map((item) => item.toJson()).toList(),
+      'sharedBy': FirebaseAuth.instance.currentUser?.email ?? 'Anonymous',
+      'sharedAt': DateTime.now().millisecondsSinceEpoch,
+    };
+    
+    final qrData = json.encode(listData);
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Share Grocery List'),
+        content: Container(
+          width: 250,
+          height: 250,
+          child: QrImageView(
+            data: qrData,
+            version: QrVersions.auto,
+            size: 250.0,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _scanQRCode() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => QRScannerScreen(
+          onScanned: (String data) {
+            _processScannedData(data);
+          },
+        ),
+      ),
+    );
+  }
+
+  void _processScannedData(String data) {
+    try {
+      final Map<String, dynamic> listData = json.decode(data);
+      final List<dynamic> items = listData['items'];
+      final String sharedBy = listData['sharedBy'] ?? 'Unknown';
+      
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Import Grocery List'),
+          content: Text('Import ${items.length} items shared by $sharedBy?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                await _importItems(items);
+                Navigator.pop(context);
+              },
+              child: Text('Import'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Invalid QR code')),
+      );
+    }
+  }
+
+  Future<void> _importItems(List<dynamic> itemsData) async {
+    final userId = FirebaseAuth.instance.currentUser!.uid;
+    final batch = FirebaseFirestore.instance.batch();
+    
+    for (var itemData in itemsData) {
+      final item = GroceryItem.fromJson(itemData);
+      final docRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('groceries')
+          .doc();
+      
+      batch.set(docRef, {
+        'name': item.name,
+        'quantity': item.quantity,
+        'price': item.price,
+        'category': item.category,
+        'isPurchased': false, // Reset purchase status
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    }
+    
+    await batch.commit();
+    await _loadItems();
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Items imported successfully!')),
+    );
+  }
+
   void _showAddItemDialog() {
     _showItemDialog();
   }
@@ -299,7 +448,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     final priceController = TextEditingController(
       text: item?.price.toString() ?? '0.0',
     );
-    String selectedCategory = item?.category ?? _categories.first;
+    String selectedCategory = item?.category ?? _categories[1]; // Skip 'All'
 
     showDialog(
       context: context,
@@ -326,7 +475,10 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                 Expanded(
                   child: TextField(
                     controller: priceController,
-                    decoration: InputDecoration(labelText: 'Price'),
+                    decoration: InputDecoration(
+                      labelText: 'Price (RM)',
+                      prefixText: 'RM ',
+                    ),
                     keyboardType: TextInputType.numberWithOptions(
                       decimal: true,
                     ),
@@ -338,7 +490,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
             DropdownButtonFormField<String>(
               value: selectedCategory,
               decoration: InputDecoration(labelText: 'Category'),
-              items: _categories.map((cat) {
+              items: _categories.skip(1).map((cat) { // Skip 'All'
                 return DropdownMenuItem(
                   value: cat,
                   child: Row(
@@ -399,11 +551,11 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
               _items.where((i) => !i.isPurchased).length.toString(),
             ),
             Divider(),
-            _budgetRow('Total Budget', '\$${_totalBudget.toStringAsFixed(2)}'),
-            _budgetRow('Spent', '\$${_spentAmount.toStringAsFixed(2)}'),
+            _budgetRow('Total Budget', 'RM${_totalBudget.toStringAsFixed(2)}'),
+            _budgetRow('Spent', 'RM${_spentAmount.toStringAsFixed(2)}'),
             _budgetRow(
               'Remaining',
-              '\$${(_totalBudget - _spentAmount).toStringAsFixed(2)}',
+              'RM${(_totalBudget - _spentAmount).toStringAsFixed(2)}',
             ),
           ],
         ),
@@ -492,14 +644,270 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     await _updateItem(updatedItem);
   }
 
-  Future<void> _firebaseTest() async {
-    final userId = FirebaseAuth.instance.currentUser!.uid;
-    final snapshot = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .collection('groceries')
-        .get();
+  @override
+  void dispose() {
+    _scannerController?.dispose();
+    super.dispose();
+  }
+}
 
-    final groceries = snapshot.docs.map((doc) => doc.data()).toList();
+// Separate QR Scanner Screen
+class QRScannerScreen extends StatefulWidget {
+  final Function(String) onScanned;
+
+  const QRScannerScreen({Key? key, required this.onScanned}) : super(key: key);
+
+  @override
+  _QRScannerScreenState createState() => _QRScannerScreenState();
+}
+
+class _QRScannerScreenState extends State<QRScannerScreen> {
+  MobileScannerController cameraController = MobileScannerController();
+  bool _isScanned = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Scan QR Code'),
+        backgroundColor: Colors.black,
+        iconTheme: IconThemeData(color: Colors.white),
+        titleTextStyle: TextStyle(color: Colors.white, fontSize: 20),
+        actions: [
+          IconButton(
+            color: Colors.white,
+            icon: ValueListenableBuilder(
+              valueListenable: cameraController.torchState,
+              builder: (context, state, child) {
+                switch (state) {
+                  case TorchState.off:
+                    return const Icon(Icons.flash_off, color: Colors.grey);
+                  case TorchState.on:
+                    return const Icon(Icons.flash_on, color: Colors.yellow);
+                }
+                return child ?? Container(); // Return child or empty container
+              },
+            ),
+            iconSize: 32.0,
+            onPressed: () => cameraController.toggleTorch(),
+          ),
+          IconButton(
+            color: Colors.white,
+            icon: ValueListenableBuilder(
+              valueListenable: cameraController.cameraFacingState,
+              builder: (context, state, child) {
+                switch (state) {
+                  case CameraFacing.front:
+                    return const Icon(Icons.camera_front);
+                  case CameraFacing.back:
+                    return const Icon(Icons.camera_rear);
+                }
+                return child ?? Container(); // Return child or empty container
+              },
+            ),
+            iconSize: 32.0,
+            onPressed: () => cameraController.switchCamera(),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          MobileScanner(
+            controller: cameraController,
+            onDetect: (capture) {
+              if (!_isScanned) {
+                final List<Barcode> barcodes = capture.barcodes;
+                for (final barcode in barcodes) {
+                  if (barcode.rawValue != null) {
+                    setState(() {
+                      _isScanned = true;
+                    });
+                    widget.onScanned(barcode.rawValue!);
+                    Navigator.pop(context);
+                    break;
+                  }
+                }
+              }
+            },
+          ),
+          // Scanning overlay
+          Container(
+            decoration: ShapeDecoration(
+              shape: QrScannerOverlayShape(
+                borderColor: Colors.green,
+                borderRadius: 10,
+                borderLength: 30,
+                borderWidth: 10,
+                cutOutSize: 250,
+              ),
+            ),
+          ),
+          // Instructions
+          Positioned(
+            bottom: 100,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Position the QR code within the frame to scan',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  backgroundColor: Colors.black54,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    cameraController.dispose();
+    super.dispose();
+  }
+}
+
+// Custom overlay shape for QR scanner
+class QrScannerOverlayShape extends ShapeBorder {
+  const QrScannerOverlayShape({
+    this.borderColor = Colors.red,
+    this.borderWidth = 3.0,
+    this.overlayColor = const Color.fromRGBO(0, 0, 0, 80),
+    this.borderRadius = 0,
+    this.borderLength = 40,
+    double? cutOutSize,
+    double? cutOutWidth,
+    double? cutOutHeight,
+  })  : cutOutWidth = cutOutWidth ?? cutOutSize ?? 250,
+        cutOutHeight = cutOutHeight ?? cutOutSize ?? 250;
+
+  final Color borderColor;
+  final double borderWidth;
+  final Color overlayColor;
+  final double borderRadius;
+  final double borderLength;
+  final double cutOutWidth;
+  final double cutOutHeight;
+
+  @override
+  EdgeInsetsGeometry get dimensions => const EdgeInsets.all(10);
+
+  @override
+  Path getInnerPath(Rect rect, {TextDirection? textDirection}) {
+    return Path()
+      ..fillType = PathFillType.evenOdd
+      ..addPath(getOuterPath(rect), Offset.zero);
+  }
+
+  @override
+  Path getOuterPath(Rect rect, {TextDirection? textDirection}) {
+    Path _getLeftTopPath(Rect rect) {
+      return Path()
+        ..moveTo(rect.left, rect.bottom)
+        ..lineTo(rect.left, rect.top + borderRadius)
+        ..quadraticBezierTo(rect.left, rect.top, rect.left + borderRadius, rect.top)
+        ..lineTo(rect.right, rect.top);
+    }
+
+    return _getLeftTopPath(rect)
+      ..lineTo(rect.right, rect.bottom)
+      ..lineTo(rect.left, rect.bottom)
+      ..lineTo(rect.left, rect.top);
+  }
+
+  @override
+  void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {
+    final width = rect.width;
+    final borderWidthSize = width / 2;
+    final height = rect.height;
+    final borderHeightSize = height / 2;
+    final cutOutWidth = this.cutOutWidth < width ? this.cutOutWidth : width - borderWidth;
+    final cutOutHeight = this.cutOutHeight < height ? this.cutOutHeight : height - borderWidth;
+
+    final backgroundPaint = Paint()
+      ..color = overlayColor
+      ..style = PaintingStyle.fill;
+
+    final boxPaint = Paint()
+      ..color = borderColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = borderWidth;
+
+    final cutOutRect = Rect.fromLTWH(
+      rect.left + (width - cutOutWidth) / 2 + borderWidth,
+      rect.top + (height - cutOutHeight) / 2 + borderWidth,
+      cutOutWidth - borderWidth * 2,
+      cutOutHeight - borderWidth * 2,
+    );
+
+    canvas
+      ..saveLayer(
+        rect,
+        backgroundPaint,
+      )
+      ..drawRect(rect, backgroundPaint)
+      ..drawRRect(
+        RRect.fromRectAndCorners(
+          cutOutRect,
+          topLeft: Radius.circular(borderRadius),
+          topRight: Radius.circular(borderRadius),
+          bottomLeft: Radius.circular(borderRadius),
+          bottomRight: Radius.circular(borderRadius),
+        ),
+        boxPaint..blendMode = BlendMode.clear,
+      )
+      ..restore();
+
+    // Draw corner borders
+    final borderPaint = Paint()
+      ..color = borderColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = borderWidth;
+
+    final path = Path();
+
+    // Top left corner
+    path.moveTo(cutOutRect.left - borderWidth, cutOutRect.top - borderWidth + borderLength);
+    path.lineTo(cutOutRect.left - borderWidth, cutOutRect.top - borderWidth + borderRadius);
+    path.quadraticBezierTo(cutOutRect.left - borderWidth, cutOutRect.top - borderWidth,
+        cutOutRect.left - borderWidth + borderRadius, cutOutRect.top - borderWidth);
+    path.lineTo(cutOutRect.left - borderWidth + borderLength, cutOutRect.top - borderWidth);
+
+    // Top right corner
+    path.moveTo(cutOutRect.right + borderWidth - borderLength, cutOutRect.top - borderWidth);
+    path.lineTo(cutOutRect.right + borderWidth - borderRadius, cutOutRect.top - borderWidth);
+    path.quadraticBezierTo(cutOutRect.right + borderWidth, cutOutRect.top - borderWidth,
+        cutOutRect.right + borderWidth, cutOutRect.top - borderWidth + borderRadius);
+    path.lineTo(cutOutRect.right + borderWidth, cutOutRect.top - borderWidth + borderLength);
+
+    // Bottom right corner
+    path.moveTo(cutOutRect.right + borderWidth, cutOutRect.bottom + borderWidth - borderLength);
+    path.lineTo(cutOutRect.right + borderWidth, cutOutRect.bottom + borderWidth - borderRadius);
+    path.quadraticBezierTo(cutOutRect.right + borderWidth, cutOutRect.bottom + borderWidth,
+        cutOutRect.right + borderWidth - borderRadius, cutOutRect.bottom + borderWidth);
+    path.lineTo(cutOutRect.right + borderWidth - borderLength, cutOutRect.bottom + borderWidth);
+
+    // Bottom left corner
+    path.moveTo(cutOutRect.left - borderWidth + borderLength, cutOutRect.bottom + borderWidth);
+    path.lineTo(cutOutRect.left - borderWidth + borderRadius, cutOutRect.bottom + borderWidth);
+    path.quadraticBezierTo(cutOutRect.left - borderWidth, cutOutRect.bottom + borderWidth,
+        cutOutRect.left - borderWidth, cutOutRect.bottom + borderWidth - borderRadius);
+    path.lineTo(cutOutRect.left - borderWidth, cutOutRect.bottom + borderWidth - borderLength);
+
+    canvas.drawPath(path, borderPaint);
+  }
+
+  @override
+  ShapeBorder scale(double t) {
+    return QrScannerOverlayShape(
+      borderColor: borderColor,
+      borderWidth: borderWidth,
+      overlayColor: overlayColor,
+    );
   }
 }
