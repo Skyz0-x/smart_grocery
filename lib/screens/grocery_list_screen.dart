@@ -472,13 +472,15 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
   }
 
   void _generateQRCode() {
-    final listData = {
-      'items': _items.map((item) => item.toJson()).toList(),
-      'sharedBy': FirebaseAuth.instance.currentUser?.email ?? 'Anonymous',
-      'sharedAt': DateTime.now().millisecondsSinceEpoch,
+    // Use the new simple format: {'l': [{'n': name, 'q': quantity}, ...]}
+    final simpleList = {
+      'l': _items.map((item) => {
+        'n': item.name,
+        'q': item.quantity,
+      }).toList(),
     };
 
-    final qrData = json.encode(listData);
+    final qrData = json.encode(simpleList);
 
     showDialog(
       context: context,
@@ -517,9 +519,28 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
 
   void _processScannedData(String data) {
     try {
-      final Map<String, dynamic> listData = json.decode(data);
-      final List<dynamic> items = listData['items'];
-      final String sharedBy = listData['sharedBy'] ?? 'Unknown';
+      final Map<String, dynamic> decoded = json.decode(data);
+      List<dynamic> items = [];
+      String sharedBy = 'Unknown';
+
+      if (decoded.containsKey('items')) {
+        // Old format
+        items = decoded['items'];
+        sharedBy = decoded['sharedBy'] ?? 'Unknown';
+      } else if (decoded.containsKey('l')) {
+        // New simple format
+        items = decoded['l'].map((item) => {
+          'name': item['n'],
+          'quantity': item['q'],
+          'price': 0.0,
+          'category': 'Other',
+          'isPurchased': false,
+          'createdAt': null,
+        }).toList();
+        sharedBy = 'QR Import';
+      } else {
+        throw Exception('Unrecognized QR format');
+      }
 
       showDialog(
         context: context,
