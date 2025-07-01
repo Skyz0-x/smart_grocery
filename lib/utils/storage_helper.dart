@@ -4,6 +4,7 @@ import '../models/grocery_item.dart';
 
 class StorageHelper {
   static const String _itemsKey = 'grocery_items';
+  static const String _budgetKey = 'budget_limit';
 
   static Future<List<GroceryItem>> getItems() async {
     final prefs = await SharedPreferences.getInstance();
@@ -39,5 +40,15 @@ class StorageHelper {
     final items = await getItems();
     items.removeWhere((item) => item.id == id);
     await saveItems(items);
+  }
+
+  static Future<double?> getBudget() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble(_budgetKey);
+  }
+
+  static Future<void> setBudget(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_budgetKey, value);
   }
 }

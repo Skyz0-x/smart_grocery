@@ -12,6 +12,7 @@ class GroceryApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'Smart Grocery List',
       theme: ThemeData(primarySwatch: Colors.green),
       home: LoginScreen(),

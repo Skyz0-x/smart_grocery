@@ -32,10 +32,29 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
   String _selectedCategory = 'All';
   MobileScannerController? _scannerController;
 
+  double? _budgetLimit;
+
+  String? _expandedCategory; // Track expanded/collapsed state of categories
+
   @override
   void initState() {
     super.initState();
     _loadItems();
+    _loadBudget();
+  }
+
+  Future<void> _loadBudget() async {
+    final budget = await StorageHelper.getBudget();
+    setState(() {
+      _budgetLimit = budget;
+    });
+  }
+
+  Future<void> _setBudget(double value) async {
+    await StorageHelper.setBudget(value);
+    setState(() {
+      _budgetLimit = value;
+    });
   }
 
   Future<void> _loadItems() async {
@@ -133,24 +152,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
           _buildBudgetSummary(),
           _buildCategoryChips(),
           Expanded(
-            child: _items.isEmpty
-                ? _buildEmptyMessage()
-                : ListView.builder(
-                    padding: EdgeInsets.all(16),
-                    itemCount: _itemsByCategory.keys.length,
-                    itemBuilder: (context, index) {
-                      final category = _itemsByCategory.keys.elementAt(index);
-                      final items = _itemsByCategory[category]!;
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildCategoryHeader(category),
-                          ...items.map((item) => _buildItemCard(item)),
-                          SizedBox(height: 16),
-                        ],
-                      );
-                    },
-                  ),
+            child: _buildCategoryListOrEmpty(),
           ),
         ],
       ),
@@ -161,7 +163,45 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     );
   }
 
+  Widget _buildCategoryListOrEmpty() {
+    // Only show the selected category header and its suggestions/items
+    if (_selectedCategory == 'All') {
+      if (_itemsByCategory.isEmpty) {
+        return Center(child: Text('No items in your list. Tap + to add.'));
+      } else {
+        return ListView.builder(
+          padding: EdgeInsets.all(16),
+          itemCount: _itemsByCategory.keys.length,
+          itemBuilder: (context, index) {
+            final category = _itemsByCategory.keys.elementAt(index);
+            final items = _itemsByCategory[category]!;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildCategoryHeader(category),
+                ...items.map((item) => _buildItemCard(item)),
+                SizedBox(height: 16),
+              ],
+            );
+          },
+        );
+      }
+    } else {
+      // Show only the selected category header and its suggestions/items
+      return ListView(
+        padding: EdgeInsets.all(16),
+        children: [
+          _buildCategoryHeader(_selectedCategory),
+          ...(_itemsByCategory[_selectedCategory]
+                  ?.map((item) => _buildItemCard(item)) ??
+              []),
+        ],
+      );
+    }
+  }
+
   Widget _buildBudgetSummary() {
+    final overBudget = _budgetLimit != null && _spentAmount > _budgetLimit!;
     return Container(
       margin: EdgeInsets.all(16),
       padding: EdgeInsets.all(16),
@@ -174,8 +214,33 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
           _budgetTile('Total', _totalBudget, Colors.green),
-          _budgetTile('Spent', _spentAmount, Colors.red),
-          _budgetTile('Remaining', _totalBudget - _spentAmount, Colors.blue),
+          _budgetTile(
+              'Spent', _spentAmount, overBudget ? Colors.red : Colors.red),
+          GestureDetector(
+            onTap: _showSetBudgetDialog,
+            child: Column(
+              children: [
+                Text('Budget', style: TextStyle(fontWeight: FontWeight.bold)),
+                Text(
+                  _budgetLimit != null
+                      ? 'RM${_budgetLimit!.toStringAsFixed(2)}'
+                      : 'Set',
+                  style: TextStyle(
+                    fontSize: 18,
+                    color: Colors.blue,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _budgetTile(
+            'Remaining',
+            _budgetLimit != null
+                ? _budgetLimit! - _spentAmount
+                : _totalBudget - _spentAmount,
+            overBudget ? Colors.red : Colors.blue,
+          ),
         ],
       ),
     );
@@ -211,7 +276,13 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
       child: FilterChip(
         label: Text(category),
         selected: isSelected,
-        onSelected: (_) => setState(() => _selectedCategory = category),
+        onSelected: (_) {
+          setState(() {
+            _selectedCategory = category;
+            // Expand/collapse suggestions for this category
+            _expandedCategory = category == 'All' ? null : category;
+          });
+        },
         selectedColor: Colors.green[200],
         checkmarkColor: Colors.green[700],
       ),
@@ -238,19 +309,92 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
   Widget _buildCategoryHeader(String category) {
     return Padding(
       padding: EdgeInsets.symmetric(vertical: 8),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(_getCategoryIcon(category), color: Colors.green[600]),
-          SizedBox(width: 8),
-          Text(
-            category,
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.green[700],
-            ),
+          Row(
+            children: [
+              Icon(_getCategoryIcon(category), color: Colors.green[600]),
+              SizedBox(width: 8),
+              Text(
+                category,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.green[700],
+                ),
+              ),
+            ],
           ),
+          if (category != 'All' && _expandedCategory == category)
+            _buildQuickSuggestionsRow(category),
         ],
+      ),
+    );
+  }
+
+  // Suggestion row under each category header
+  Widget _buildQuickSuggestionsRow(String category) {
+    final Map<String, List<String>> quickItems = {
+      'Fruits & Vegetables': [
+        'Apple',
+        'Banana',
+        'Carrot',
+        'Tomato',
+        'Potato',
+        'Spinach'
+      ],
+      'Dairy & Eggs': ['Milk', 'Eggs', 'Cheese', 'Yogurt', 'Butter'],
+      'Meat & Seafood': [
+        'Chicken Breast',
+        'Salmon',
+        'Beef',
+        'Shrimp',
+        'Sausage'
+      ],
+      'Pantry': ['Rice', 'Pasta', 'Bread', 'Flour', 'Sugar', 'Salt'],
+      'Beverages': ['Water', 'Juice', 'Coffee', 'Tea', 'Soda'],
+      'Snacks': ['Chips', 'Chocolate', 'Cookies', 'Nuts', 'Popcorn'],
+      'Frozen': [
+        'Ice Cream',
+        'Frozen Pizza',
+        'Frozen Vegetables',
+        'Frozen Fries'
+      ],
+      'Household': ['Toilet Paper', 'Soap', 'Detergent', 'Shampoo'],
+      'Other': ['Batteries', 'Pet Food', 'Light Bulb'],
+    };
+    final items = quickItems[category] ?? [];
+    if (items.isEmpty) return SizedBox.shrink();
+    return Container(
+      margin: EdgeInsets.only(top: 4, left: 32),
+      height: 36,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: items.map((itemName) {
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ActionChip(
+              label: Text(itemName),
+              avatar: Icon(Icons.add, size: 18, color: Colors.green),
+              onPressed: () async {
+                final item = GroceryItem(
+                  name: itemName,
+                  quantity: 1,
+                  price: 0.0,
+                  category: category,
+                  isPurchased: false,
+                );
+                await _addItem(item);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('$itemName added!')),
+                );
+              },
+              backgroundColor: Colors.green[50],
+              shape: StadiumBorder(side: BorderSide(color: Colors.green[200]!)),
+            ),
+          );
+        }).toList(),
       ),
     );
   }
@@ -283,8 +427,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
           onSelected: (value) {
             if (value == 'edit')
               _showItemDialog(item: item);
-            else if (value == 'delete')
-              _deleteItem(item);
+            else if (value == 'delete') _deleteItem(item);
           },
         ),
       ),
@@ -334,9 +477,9 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
       'sharedBy': FirebaseAuth.instance.currentUser?.email ?? 'Anonymous',
       'sharedAt': DateTime.now().millisecondsSinceEpoch,
     };
-    
+
     final qrData = json.encode(listData);
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -360,17 +503,16 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     );
   }
 
-  void _scanQRCode() {
-    Navigator.push(
+  void _scanQRCode() async {
+    final result = await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => QRScannerScreen(
-          onScanned: (String data) {
-            _processScannedData(data);
-          },
-        ),
+        builder: (context) => QRScannerScreen(),
       ),
     );
+    if (result != null && result is String) {
+      _processScannedData(result);
+    }
   }
 
   void _processScannedData(String data) {
@@ -378,7 +520,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
       final Map<String, dynamic> listData = json.decode(data);
       final List<dynamic> items = listData['items'];
       final String sharedBy = listData['sharedBy'] ?? 'Unknown';
-      
+
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
@@ -409,7 +551,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
   Future<void> _importItems(List<dynamic> itemsData) async {
     final userId = FirebaseAuth.instance.currentUser!.uid;
     final batch = FirebaseFirestore.instance.batch();
-    
+
     for (var itemData in itemsData) {
       final item = GroceryItem.fromJson(itemData);
       final docRef = FirebaseFirestore.instance
@@ -417,7 +559,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
           .doc(userId)
           .collection('groceries')
           .doc();
-      
+
       batch.set(docRef, {
         'name': item.name,
         'quantity': item.quantity,
@@ -427,10 +569,10 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
         'createdAt': FieldValue.serverTimestamp(),
       });
     }
-    
+
     await batch.commit();
     await _loadItems();
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Items imported successfully!')),
     );
@@ -490,7 +632,8 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
             DropdownButtonFormField<String>(
               value: selectedCategory,
               decoration: InputDecoration(labelText: 'Category'),
-              items: _categories.skip(1).map((cat) { // Skip 'All'
+              items: _categories.skip(1).map((cat) {
+                // Skip 'All'
                 return DropdownMenuItem(
                   value: cat,
                   child: Row(
@@ -533,7 +676,96 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     );
   }
 
+  // Quick add: Show a dialog with common grocery items by category for fast adding
+  void _showQuickAddDialog() {
+    final Map<String, List<String>> quickItems = {
+      'Fruits & Vegetables': [
+        'Apple',
+        'Banana',
+        'Carrot',
+        'Tomato',
+        'Potato',
+        'Spinach'
+      ],
+      'Dairy & Eggs': ['Milk', 'Eggs', 'Cheese', 'Yogurt', 'Butter'],
+      'Meat & Seafood': [
+        'Chicken Breast',
+        'Salmon',
+        'Beef',
+        'Shrimp',
+        'Sausage'
+      ],
+      'Pantry': ['Rice', 'Pasta', 'Bread', 'Flour', 'Sugar', 'Salt'],
+      'Beverages': ['Water', 'Juice', 'Coffee', 'Tea', 'Soda'],
+      'Snacks': ['Chips', 'Chocolate', 'Cookies', 'Nuts', 'Popcorn'],
+      'Frozen': [
+        'Ice Cream',
+        'Frozen Pizza',
+        'Frozen Vegetables',
+        'Frozen Fries'
+      ],
+      'Household': ['Toilet Paper', 'Soap', 'Detergent', 'Shampoo'],
+      'Other': ['Batteries', 'Pet Food', 'Light Bulb'],
+    };
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Quick Add Groceries'),
+        content: Container(
+          width: double.maxFinite,
+          child: DefaultTabController(
+            length: quickItems.keys.length,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TabBar(
+                  isScrollable: true,
+                  tabs: quickItems.keys.map((cat) => Tab(text: cat)).toList(),
+                  labelColor: Colors.green,
+                  unselectedLabelColor: Colors.black,
+                ),
+                Container(
+                  height: 200,
+                  child: TabBarView(
+                    children: quickItems.entries.map((entry) {
+                      return ListView(
+                        children: entry.value.map((itemName) {
+                          return ListTile(
+                            title: Text(itemName),
+                            trailing: Icon(Icons.add, color: Colors.green),
+                            onTap: () async {
+                              final item = GroceryItem(
+                                name: itemName,
+                                quantity: 1,
+                                price: 0.0,
+                                category: entry.key,
+                                isPurchased: false,
+                              );
+                              await _addItem(item);
+                              Navigator.pop(ctx);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('$itemName added!')),
+                              );
+                            },
+                          );
+                        }).toList(),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Close')),
+        ],
+      ),
+    );
+  }
+
   void _showBudgetDialog() {
+    final overBudget = _budgetLimit != null && _spentAmount > _budgetLimit!;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -554,13 +786,68 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
             _budgetRow('Total Budget', 'RM${_totalBudget.toStringAsFixed(2)}'),
             _budgetRow('Spent', 'RM${_spentAmount.toStringAsFixed(2)}'),
             _budgetRow(
-              'Remaining',
-              'RM${(_totalBudget - _spentAmount).toStringAsFixed(2)}',
+              'Budget Limit',
+              _budgetLimit != null
+                  ? 'RM${_budgetLimit!.toStringAsFixed(2)}'
+                  : 'Not set',
             ),
+            _budgetRow(
+              'Remaining',
+              _budgetLimit != null
+                  ? 'RM${(_budgetLimit! - _spentAmount).toStringAsFixed(2)}'
+                  : 'RM${(_totalBudget - _spentAmount).toStringAsFixed(2)}',
+            ),
+            if (overBudget)
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0),
+                child: Text(
+                  'You have exceeded your budget!',
+                  style:
+                      TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                ),
+              ),
           ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Close')),
+          TextButton(
+              onPressed: _showSetBudgetDialog, child: Text('Set Budget')),
+        ],
+      ),
+    );
+  }
+
+  void _showSetBudgetDialog() {
+    final controller = TextEditingController(
+      text: _budgetLimit != null ? _budgetLimit!.toStringAsFixed(2) : '',
+    );
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Set Budget Limit'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            labelText: 'Budget (RM)',
+            prefixText: 'RM ',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final value = double.tryParse(controller.text);
+              if (value != null && value >= 0) {
+                _setBudget(value);
+                Navigator.pop(ctx);
+              }
+            },
+            child: Text('Save'),
+          ),
         ],
       ),
     );
@@ -587,13 +874,13 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
           .doc(userId)
           .collection('groceries')
           .add({
-            'name': item.name,
-            'quantity': item.quantity,
-            'price': item.price,
-            'category': item.category,
-            'isPurchased': item.isPurchased,
-            'createdAt': FieldValue.serverTimestamp(),
-          });
+        'name': item.name,
+        'quantity': item.quantity,
+        'price': item.price,
+        'category': item.category,
+        'isPurchased': item.isPurchased,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
       _loadItems();
     } catch (e) {
       ScaffoldMessenger.of(
@@ -610,13 +897,13 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
         .collection('groceries')
         .doc(item.id)
         .update({
-          'name': item.name,
-          'quantity': item.quantity,
-          'price': item.price,
-          'category': item.category,
-          'isPurchased': item.isPurchased,
-          // Don't update createdAt
-        });
+      'name': item.name,
+      'quantity': item.quantity,
+      'price': item.price,
+      'category': item.category,
+      'isPurchased': item.isPurchased,
+      // Don't update createdAt
+    });
     _loadItems();
   }
 
@@ -653,9 +940,8 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
 
 // Separate QR Scanner Screen
 class QRScannerScreen extends StatefulWidget {
-  final Function(String) onScanned;
-
-  const QRScannerScreen({Key? key, required this.onScanned}) : super(key: key);
+  // Remove onScanned callback
+  const QRScannerScreen({Key? key}) : super(key: key);
 
   @override
   _QRScannerScreenState createState() => _QRScannerScreenState();
@@ -685,7 +971,7 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                   case TorchState.on:
                     return const Icon(Icons.flash_on, color: Colors.yellow);
                 }
-                return child ?? Container(); // Return child or empty container
+                return child ?? Container();
               },
             ),
             iconSize: 32.0,
@@ -702,7 +988,7 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                   case CameraFacing.back:
                     return const Icon(Icons.camera_rear);
                 }
-                return child ?? Container(); // Return child or empty container
+                return child ?? Container();
               },
             ),
             iconSize: 32.0,
@@ -722,8 +1008,7 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                     setState(() {
                       _isScanned = true;
                     });
-                    widget.onScanned(barcode.rawValue!);
-                    Navigator.pop(context);
+                    Navigator.pop(context, barcode.rawValue!);
                     break;
                   }
                 }
@@ -799,105 +1084,79 @@ class QrScannerOverlayShape extends ShapeBorder {
 
   @override
   Path getInnerPath(Rect rect, {TextDirection? textDirection}) {
-    return Path()
-      ..fillType = PathFillType.evenOdd
-      ..addPath(getOuterPath(rect), Offset.zero);
+    return Path();
   }
 
   @override
   Path getOuterPath(Rect rect, {TextDirection? textDirection}) {
-    Path _getLeftTopPath(Rect rect) {
-      return Path()
-        ..moveTo(rect.left, rect.bottom)
-        ..lineTo(rect.left, rect.top + borderRadius)
-        ..quadraticBezierTo(rect.left, rect.top, rect.left + borderRadius, rect.top)
-        ..lineTo(rect.right, rect.top);
-    }
-
-    return _getLeftTopPath(rect)
-      ..lineTo(rect.right, rect.bottom)
-      ..lineTo(rect.left, rect.bottom)
-      ..lineTo(rect.left, rect.top);
+    return Path();
   }
 
   @override
   void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {
     final width = rect.width;
-    final borderWidthSize = width / 2;
     final height = rect.height;
-    final borderHeightSize = height / 2;
-    final cutOutWidth = this.cutOutWidth < width ? this.cutOutWidth : width - borderWidth;
-    final cutOutHeight = this.cutOutHeight < height ? this.cutOutHeight : height - borderWidth;
-
-    final backgroundPaint = Paint()
-      ..color = overlayColor
-      ..style = PaintingStyle.fill;
-
-    final boxPaint = Paint()
-      ..color = borderColor
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = borderWidth;
+    final cutOutWidth =
+        this.cutOutWidth < width ? this.cutOutWidth : width - borderWidth;
+    final cutOutHeight =
+        this.cutOutHeight < height ? this.cutOutHeight : height - borderWidth;
 
     final cutOutRect = Rect.fromLTWH(
-      rect.left + (width - cutOutWidth) / 2 + borderWidth,
-      rect.top + (height - cutOutHeight) / 2 + borderWidth,
-      cutOutWidth - borderWidth * 2,
-      cutOutHeight - borderWidth * 2,
+      rect.left + (width - cutOutWidth) / 2,
+      rect.top + (height - cutOutHeight) / 2,
+      cutOutWidth,
+      cutOutHeight,
     );
 
-    canvas
-      ..saveLayer(
-        rect,
-        backgroundPaint,
-      )
-      ..drawRect(rect, backgroundPaint)
-      ..drawRRect(
-        RRect.fromRectAndCorners(
-          cutOutRect,
-          topLeft: Radius.circular(borderRadius),
-          topRight: Radius.circular(borderRadius),
-          bottomLeft: Radius.circular(borderRadius),
-          bottomRight: Radius.circular(borderRadius),
-        ),
-        boxPaint..blendMode = BlendMode.clear,
-      )
-      ..restore();
-
-    // Draw corner borders
+    // Draw only the border corners (no overlay fill)
     final borderPaint = Paint()
       ..color = borderColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = borderWidth;
 
     final path = Path();
+    final double radius = borderRadius;
+    final double length = borderLength;
 
     // Top left corner
-    path.moveTo(cutOutRect.left - borderWidth, cutOutRect.top - borderWidth + borderLength);
-    path.lineTo(cutOutRect.left - borderWidth, cutOutRect.top - borderWidth + borderRadius);
-    path.quadraticBezierTo(cutOutRect.left - borderWidth, cutOutRect.top - borderWidth,
-        cutOutRect.left - borderWidth + borderRadius, cutOutRect.top - borderWidth);
-    path.lineTo(cutOutRect.left - borderWidth + borderLength, cutOutRect.top - borderWidth);
+    path.moveTo(cutOutRect.left, cutOutRect.top + length);
+    path.lineTo(cutOutRect.left, cutOutRect.top + radius);
+    path.arcToPoint(
+      Offset(cutOutRect.left + radius, cutOutRect.top),
+      radius: Radius.circular(radius),
+      clockwise: false,
+    );
+    path.lineTo(cutOutRect.left + length, cutOutRect.top);
 
     // Top right corner
-    path.moveTo(cutOutRect.right + borderWidth - borderLength, cutOutRect.top - borderWidth);
-    path.lineTo(cutOutRect.right + borderWidth - borderRadius, cutOutRect.top - borderWidth);
-    path.quadraticBezierTo(cutOutRect.right + borderWidth, cutOutRect.top - borderWidth,
-        cutOutRect.right + borderWidth, cutOutRect.top - borderWidth + borderRadius);
-    path.lineTo(cutOutRect.right + borderWidth, cutOutRect.top - borderWidth + borderLength);
+    path.moveTo(cutOutRect.right - length, cutOutRect.top);
+    path.lineTo(cutOutRect.right - radius, cutOutRect.top);
+    path.arcToPoint(
+      Offset(cutOutRect.right, cutOutRect.top + radius),
+      radius: Radius.circular(radius),
+      clockwise: false,
+    );
+    path.lineTo(cutOutRect.right, cutOutRect.top + length);
 
     // Bottom right corner
-    path.moveTo(cutOutRect.right + borderWidth, cutOutRect.bottom + borderWidth - borderLength);
-    path.lineTo(cutOutRect.right + borderWidth, cutOutRect.bottom + borderWidth - borderRadius);
-    path.quadraticBezierTo(cutOutRect.right + borderWidth, cutOutRect.bottom + borderWidth,
-        cutOutRect.right + borderWidth - borderRadius, cutOutRect.bottom + borderWidth);
-    path.lineTo(cutOutRect.right + borderWidth - borderLength, cutOutRect.bottom + borderWidth);
+    path.moveTo(cutOutRect.right, cutOutRect.bottom - length);
+    path.lineTo(cutOutRect.right, cutOutRect.bottom - radius);
+    path.arcToPoint(
+      Offset(cutOutRect.right - radius, cutOutRect.bottom),
+      radius: Radius.circular(radius),
+      clockwise: false,
+    );
+    path.lineTo(cutOutRect.right - length, cutOutRect.bottom);
 
     // Bottom left corner
-    path.moveTo(cutOutRect.left - borderWidth + borderLength, cutOutRect.bottom + borderWidth);
-    path.lineTo(cutOutRect.left - borderWidth + borderRadius, cutOutRect.bottom + borderWidth);
-    path.quadraticBezierTo(cutOutRect.left - borderWidth, cutOutRect.bottom + borderWidth,
-        cutOutRect.left - borderWidth, cutOutRect.bottom + borderWidth - borderRadius);
-    path.lineTo(cutOutRect.left - borderWidth, cutOutRect.bottom + borderWidth - borderLength);
+    path.moveTo(cutOutRect.left + length, cutOutRect.bottom);
+    path.lineTo(cutOutRect.left + radius, cutOutRect.bottom);
+    path.arcToPoint(
+      Offset(cutOutRect.left, cutOutRect.bottom - radius),
+      radius: Radius.circular(radius),
+      clockwise: false,
+    );
+    path.lineTo(cutOutRect.left, cutOutRect.bottom - length);
 
     canvas.drawPath(path, borderPaint);
   }
