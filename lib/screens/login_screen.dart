@@ -33,21 +33,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   @override
   void dispose() {
     _animationController.dispose();
-    emailController.dispose();
-    passwordController.dispose();
     super.dispose();
-  }
-
-  void _showSnackBar(String message, {Color? backgroundColor}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: backgroundColor ?? Colors.redAccent,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        margin: EdgeInsets.all(10),
-      ),
-    );
   }
 
   void _login() async {
@@ -55,192 +41,275 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       _showSnackBar('Please fill in all fields');
       return;
     }
+
     setState(() => _isLoading = true);
+
     try {
-      User? user = await AuthService.login(
-        emailController.text.trim(),
-        passwordController.text.trim(),
+      UserCredential userCredential = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(
+            email: emailController.text.trim(),
+            password: passwordController.text.trim(),
+          );
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => GroceryListScreen()),
       );
-      if (user != null) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => GroceryListScreen()),
-              (Route<dynamic> route) => false,
-        );
-      } else {
-        _showSnackBar('Login failed. Please check your credentials.');
-      }
     } on FirebaseAuthException catch (e) {
-      String errorMessage;
+      String message = 'Login failed';
       if (e.code == 'user-not-found') {
-        errorMessage = 'No user found for that email.';
+        message = 'No user found for that email.';
       } else if (e.code == 'wrong-password') {
-        errorMessage = 'Wrong password provided for that user.';
-      } else {
-        errorMessage = e.message ?? 'An unknown error occurred.';
+        message = 'Wrong password provided.';
+      } else if (e.code == 'invalid-email') {
+        message = 'Invalid email format.';
       }
-      _showSnackBar(errorMessage);
-    } catch (e) {
-      _showSnackBar('An error occurred: ${e.toString()}');
+      _showSnackBar(message);
     } finally {
       setState(() => _isLoading = false);
     }
   }
 
+  void _showSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red[400],
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Colors.lightGreen.shade100, Colors.green.shade200],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: Center(
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: FadeTransition(
+          opacity: _fadeAnimation,
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24.0),
-            child: FadeTransition(
-              opacity: _fadeAnimation,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // App Logo/Icon
-                  Icon(
-                    Icons.shopping_basket,
-                    size: 100,
-                    color: Colors.green.shade700,
+            padding: EdgeInsets.symmetric(horizontal: 32.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SizedBox(height: 60),
+                
+                // App Logo/Icon
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: Colors.green[500],
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.green.withOpacity(0.3),
+                        blurRadius: 20,
+                        offset: Offset(0, 10),
+                      ),
+                    ],
                   ),
-                  SizedBox(height: 24),
-                  Text(
-                    'Welcome Back!',
-                    style: TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green.shade800,
-                    ),
+                  child: Icon(
+                    Icons.shopping_cart,
+                    size: 40,
+                    color: Colors.white,
                   ),
-                  SizedBox(height: 16),
-                  Text(
-                    'Sign in to manage your smart grocery list.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.grey[700],
-                    ),
+                ),
+                
+                SizedBox(height: 32),
+                
+                // Welcome Text
+                Text(
+                  'Welcome back',
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[800],
                   ),
-                  SizedBox(height: 48),
-
-                  // Email Field
-                  TextField(
+                ),
+                
+                SizedBox(height: 8),
+                
+                Text(
+                  'Sign in to your Smart Grocery account',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                
+                SizedBox(height: 48),
+                
+                // Email Field
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey[200]!),
+                  ),
+                  child: TextField(
                     controller: emailController,
                     keyboardType: TextInputType.emailAddress,
                     decoration: InputDecoration(
                       labelText: 'Email',
-                      hintText: 'Enter your email',
-                      prefixIcon: Icon(Icons.email, color: Colors.green),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                      filled: true,
-                      fillColor: Colors.white.withOpacity(0.9),
-                      floatingLabelBehavior: FloatingLabelBehavior.always,
-                      contentPadding: EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+                      prefixIcon: Icon(Icons.email_outlined, color: Colors.grey[600]),
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      labelStyle: TextStyle(color: Colors.grey[600]),
                     ),
                   ),
-                  SizedBox(height: 20),
-
-                  // Password Field
-                  TextField(
+                ),
+                
+                SizedBox(height: 16),
+                
+                // Password Field
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey[200]!),
+                  ),
+                  child: TextField(
                     controller: passwordController,
                     obscureText: _obscurePassword,
                     decoration: InputDecoration(
                       labelText: 'Password',
-                      hintText: 'Enter your password',
-                      prefixIcon: Icon(Icons.lock, color: Colors.green),
+                      prefixIcon: Icon(Icons.lock_outline, color: Colors.grey[600]),
                       suffixIcon: IconButton(
                         icon: Icon(
                           _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                          color: Colors.grey,
+                          color: Colors.grey[600],
                         ),
-                        onPressed: () {
-                          setState(() {
-                            _obscurePassword = !_obscurePassword;
-                          });
-                        },
+                        onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                       ),
-                      border: OutlineInputBorder(
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      labelStyle: TextStyle(color: Colors.grey[600]),
+                    ),
+                  ),
+                ),
+                
+                SizedBox(height: 24),
+                
+                // Login Button
+                Container(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : _login,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green[500],
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
                       ),
-                      filled: true,
-                      fillColor: Colors.white.withOpacity(0.9),
-                      floatingLabelBehavior: FloatingLabelBehavior.always,
-                      contentPadding: EdgeInsets.symmetric(vertical: 16, horizontal: 20),
                     ),
+                    child: _isLoading
+                        ? SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : Text(
+                            'Sign In',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                   ),
-                  SizedBox(height: 32),
-
-                  // Login Button
-                  _isLoading
-                      ? CircularProgressIndicator(color: Colors.green)
-                      : SizedBox(
-                    width: double.infinity,
-                    height: 56,
-                    child: ElevatedButton(
-                      onPressed: _login,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green.shade700,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15),
-                        ),
-                        elevation: 5,
-                      ),
+                ),
+                
+                SizedBox(height: 24),
+                
+                // Divider
+                Row(
+                  children: [
+                    Expanded(child: Divider(color: Colors.grey[300])),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16),
                       child: Text(
-                        'Sign In',
-                        style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold),
+                        'or',
+                        style: TextStyle(color: Colors.grey[600]),
                       ),
                     ),
-                  ),
-
-                  SizedBox(height: 24),
-
-                  // Google Sign-In Button (Enhanced)
-                  // Removed for brevity as the original request was about styling,
-                  // and adding Google Sign-In fully requires Firebase setup.
-                  // You can re-add if you have Firebase Google Auth configured.
-                  // SizedBox(height: 48),
-
-                  // Register Link
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        "Don't have an account? ",
-                        style: TextStyle(color: Colors.grey[700], fontSize: 15),
+                    Expanded(child: Divider(color: Colors.grey[300])),
+                  ],
+                ),
+                
+                SizedBox(height: 24),
+                
+                // Google Sign In Button (Placeholder - you'll need to implement Google Auth)
+                Container(
+                  width: double.infinity,
+                  height: 56,
+                  child: OutlinedButton(
+                    onPressed: () {
+                      // TODO: Implement Google Sign In
+                      _showSnackBar('Google Sign In coming soon!');
+                    },
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: Colors.grey[300]!),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      GestureDetector(
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (context) => RegisterScreen()),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Image.asset(
+                          'assets/google_logo.png', // You'll need to add this asset
+                          width: 24,
+                          height: 24,
+                          errorBuilder: (context, error, stackTrace) => 
+                            Icon(Icons.login, size: 24, color: Colors.grey[600]),
                         ),
-                        child: Text(
-                          'Sign up',
+                        SizedBox(width: 12),
+                        Text(
+                          'Continue with Google',
                           style: TextStyle(
-                            color: Colors.green[800],
-                            fontWeight: FontWeight.w700,
-                            fontSize: 15,
-                            decoration: TextDecoration.underline,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.grey[700],
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-
-                  SizedBox(height: 32),
-                ],
-              ),
+                ),
+                
+                SizedBox(height: 48),
+                
+                // Register Link
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      "Don't have an account? ",
+                      style: TextStyle(color: Colors.grey[600]),
+                    ),
+                    GestureDetector(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => RegisterScreen()),
+                      ),
+                      child: Text(
+                        'Sign up',
+                        style: TextStyle(
+                          color: Colors.green[600],
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                
+                SizedBox(height: 32),
+              ],
             ),
           ),
         ),
